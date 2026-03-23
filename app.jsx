@@ -1,379 +1,277 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { 
-  ChevronDown, 
-  Download, 
-  AlertCircle, 
-  CheckCircle2, 
-  Filter,
-  Check,
-  ArrowLeft,
-  Building2,
-  FileText,
-  TrendingUp
+  Plus, 
+  Search, 
+  LayoutGrid, 
+  Settings, 
+  LogOut, 
+  ChevronRight,
+  Database,
+  ExternalLink,
+  RefreshCw,
+  TrendingDown,
+  TrendingUp,
+  Target,
+  AlertCircle,
+  Briefcase,
+  Calendar,
+  DollarSign,
+  Percent
 } from 'lucide-react';
 
+// Función robusta para acceder a variables de entorno con fallback para nombres erróneos
+const getEnvVariable = (keys) => {
+  for (const key of keys) {
+    try {
+      if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) {
+        return import.meta.env[key];
+      }
+      if (typeof process !== 'undefined' && process.env && process.env[key]) {
+        return process.env[key];
+      }
+    } catch (e) {}
+  }
+  return '';
+};
+
+// Buscamos la URL y la Key usando los nombres estándar y el que aparece en tu captura
+const supabaseUrl = getEnvVariable(['VITE_SUPABASE_URL']);
+const supabaseAnonKey = getEnvVariable(['VITE_SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_URL']);
+
+const supabase = (supabaseUrl && supabaseAnonKey) 
+  ? createClient(supabaseUrl, supabaseAnonKey) 
+  : null;
+
 const App = () => {
-  // Estado para la navegación entre vistas
-  const [view, setView] = useState('list'); // 'list' o 'detail'
+  const [datos, setDatos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const [selectedItem, setSelectedItem] = useState(null);
 
-  // Datos originales restaurados
-  const [data] = useState([
-    { id: 1, nombre: 'ESC. LUIS VERNET Presupuesto-REVISADO.xlsx', monto: 12450800.50, desvio: -13.29, veredicto: 'APTO (En Rango)', empresa: 'SCHIAVI ANGEL EDUARDO', comitente: 'DIRECCIÓN DE MANTENIMIENTO Y OBRAS MENORES' },
-    { id: 2, nombre: 'Planilla SIGOP Obras Menores - Esc. José Manuel Estrada', monto: 8900450.00, desvio: 0.00, veredicto: 'APTO (En Rango)', empresa: 'CONSTRUCCIONES S.A.', comitente: 'DIRECCIÓN DE MANTENIMIENTO Y OBRAS MENORES' },
-    { id: 3, nombre: 'Planilla SIGOP Obras Menores - Esc. Jorge Luis Borges', monto: 7500000.00, desvio: 0.00, veredicto: 'APTO (En Rango)', empresa: 'OBRAS CIVILES SRL', comitente: 'DIRECCIÓN DE MANTENIMIENTO Y OBRAS MENORES' },
-    { id: 4, nombre: 'PME 2026 - ESCUELA MARTIN YANZON - PLAN A SAS', monto: 15600780.20, desvio: 3.23, veredicto: 'APTO (En Rango)', empresa: 'PLAN A SAS', comitente: 'DIRECCIÓN DE MANTENIMIENTO Y OBRAS MENORES' },
-    { id: 5, nombre: 'ESC JOSE DE CALAZANZ-REVISADO.xlsx', monto: 18900200.00, desvio: 7.36, veredicto: 'EN OBSERVACIÓN (Requiere Justificación)', empresa: 'SUR CONSTRUCCIONES', comitente: 'DIRECCIÓN DE MANTENIMIENTO Y OBRAS MENORES' },
-    { id: 6, nombre: 'Planilla SIGOP PME 2026 - ESC. PROV DE BS. AS.', monto: 11200000.00, desvio: 8.26, veredicto: 'EN OBSERVACIÓN (Requiere Justificación)', empresa: 'ESTRUCTURAS SRL', comitente: 'DIRECCIÓN DE MANTENIMIENTO Y OBRAS MENORES' },
-    { id: 7, nombre: 'ENI 24 Alfonsina Storni.xlsx', monto: 9450600.00, desvio: 16.03, veredicto: 'EN OBSERVACIÓN (Requiere Justificación)', empresa: 'ALFA CONSTRUCTORA', comitente: 'DIRECCIÓN DE MANTENIMIENTO Y OBRAS MENORES' },
-    { id: 8, nombre: 'Planilla SIGOP PME 2026 - ENI N°4 MARTHA SALOTTI', monto: 22300150.75, desvio: 24.45, veredicto: 'NO APTO (Fuera de Rango / Sobrevaluado)', empresa: 'NORTE OBRAS SRL', comitente: 'DIRECCIÓN DE MANTENIMIENTO Y OBRAS MENORES' },
-    { id: 9, nombre: 'ESC ALFONSINA STORNI PERIODO ESTIVAL 2026-1.xlsx', monto: 31000500.00, desvio: 37.65, veredicto: 'NO APTO (Fuera de Rango / Sobrevaluado)', empresa: 'ZONA OESTE CONSTRUCCIONES', comitente: 'DIRECCIÓN DE MANTENIMIENTO Y OBRAS MENORES' },
-    { id: 10, nombre: 'ESCUELA ALBERT EINSTEIN 2026.xlsx', monto: 14750000.00, desvio: 46.02, veredicto: 'NO APTO (Fuera de Rango / Sobrevaluado)', empresa: 'GENESIS OBRAS', comitente: 'DIRECCIÓN DE MANTENIMIENTO Y OBRAS MENORES' },
-    { id: 11, nombre: 'Planilla SIGOP PME 2026 - PAEZ REVISADO.xlsx', monto: 19800400.00, desvio: 71.75, veredicto: 'NO APTO (Fuera de Rango / Sobrevaluado)', empresa: 'GARCIA HNOS', comitente: 'DIRECCIÓN DE MANTENIMIENTO Y OBRAS MENORES' },
-    { id: 12, nombre: 'ZOM FELIPA ROJAS ESTIVAL 2026.xlsx', monto: 28400000.00, desvio: 81.52, veredicto: 'NO APTO (Fuera de Rango / Sobrevaluado)', empresa: 'ROJAS CONSTRUCCIONES', comitente: 'DIRECCIÓN DE MANTENIMIENTO Y OBRAS MENORES' },
-  ]);
+  const fetchData = async () => {
+    if (!supabase) return;
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Consultamos la tabla 'presupuestos' basándonos en tu captura de Supabase
+      const { data, error: fetchError } = await supabase
+        .from('presupuestos') 
+        .select('*'); // Traemos todas las columnas: id, created_at, proyecto, presupuestado, ejecutado, desviacion, estado
 
-  // Mock de ítems para el detalle (Captura 3)
-  const budgetItems = [
-    { item: 'Limpieza de cubiertas de techo (superficie neta)', maestro: 653.82, cotizado: 2152.19, dif: 1498.37, desvio: 229.17 },
-    { item: 'Canaleta descarga pluvial de Chapa Gº n.º 25 - Desarrollo 0.33 m.', maestro: 57624.41, cotizado: 2110.40, dif: -55514.01, desvio: -96.34 },
-    { item: 'Desobstrucción de cañerías de desagüe cloacal y/o pluvial', maestro: 1860.86, cotizado: 4596.90, dif: 2736.04, desvio: 147.03 },
-    { item: 'Provisión y colocación de cámara de inspección 0.60x0.60', maestro: 280000.00, cotizado: 334140.00, dif: 54140.00, desvio: 19.33 },
-    { item: 'Colocación de tapas de Piletas de patios - B.A - B.C', maestro: 25157.88, cotizado: 287231.00, dif: 262073.12, desvio: 1041.71 },
-    { item: 'Lavado y desinfección de Tanques de Reserva 1100 lts', maestro: 60173.60, cotizado: 53307.00, dif: -6866.60, desvio: -11.41 },
-    { item: 'Reemplazo de Tapa de tanque de reserva de P.R.F.V de 1100 lts', maestro: 21254.93, cotizado: 31949.40, dif: 10694.47, desvio: 50.32 },
-    { item: 'Provisión y colocación de flexible para inodoro (entramado metalico)', maestro: 9013.50, cotizado: 86928.00, dif: 77914.50, desvio: 864.42 },
-    { item: 'Provisión y colocación de O ring de goma + Tornillo de fijación', maestro: 19916.63, cotizado: 518942.55, dif: 499025.92, desvio: 2505.57 },
-  ];
-
-  const [selectedNombres, setSelectedNombres] = useState([]);
-  const [selectedVeredictos, setSelectedVeredictos] = useState([]);
-  const [isNombreOpen, setIsNombreOpen] = useState(false);
-  const [isVeredictoOpen, setIsVeredictoOpen] = useState(false);
-
-  const nombresUnicos = useMemo(() => [...new Set(data.map(item => item.nombre))].sort(), [data]);
-  const veredictosUnicos = [
-    'APTO (En Rango)',
-    'EN OBSERVACIÓN (Requiere Justificación)',
-    'NO APTO (Fuera de Rango / Sobrevaluado)'
-  ];
-
-  const formatCurrency = (val) => {
-    return new Intl.NumberFormat('es-AR', {
-      style: 'currency',
-      currency: 'ARS',
-      minimumFractionDigits: 2
-    }).format(val);
-  };
-
-  const handleToggle = (list, setList, value) => {
-    if (list.includes(value)) {
-      setList(list.filter(item => item !== value));
-    } else {
-      setList([...list, value]);
+      if (fetchError) throw fetchError;
+      setDatos(data || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const filteredData = useMemo(() => {
-    return data.filter(item => {
-      const matchNombre = selectedNombres.length === 0 || selectedNombres.includes(item.nombre);
-      const matchVeredicto = selectedVeredictos.length === 0 || selectedVeredictos.includes(item.veredicto);
-      return matchNombre && matchVeredicto;
-    });
-  }, [data, selectedNombres, selectedVeredictos]);
+  useEffect(() => {
+    if (supabase) {
+      fetchData();
+    } else {
+      setLoading(false);
+    }
+  }, []);
 
-  const getStatusStyles = (veredicto) => {
-    if (veredicto.includes('APTO (En Rango)')) return 'bg-[#c6efce] text-[#006100] border-[#92d050]';
-    if (veredicto.includes('EN OBSERVACIÓN')) return 'bg-[#ffeb9c] text-[#9c6500] border-[#ffc000]';
-    return 'bg-[#ffc7ce] text-[#9c0006] border-[#ff0000]';
-  };
+  const filteredData = datos.filter(p => 
+    p.proyecto?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
-  const handleRowClick = (item) => {
-    setSelectedItem(item);
-    setView('detail');
-  };
+  const fmt = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(val || 0);
 
-  // VISTA DE LISTA (TU CÓDIGO ORIGINAL CON ACCIÓN DE CLIC)
-  if (view === 'list') {
+  // Pantalla de configuración si faltan las variables
+  if (!supabaseUrl || !supabaseAnonKey) {
     return (
-      <div className="min-h-screen bg-[#f3f4f6] p-4 md:p-8 font-sans text-gray-800">
-        <div className="max-w-7xl mx-auto">
-          {/* Header Superior Original */}
-          <div className="bg-[#1f4e3d] text-white p-6 rounded-t-xl shadow-lg flex flex-col md:flex-row justify-between items-center gap-4">
-            <div className="flex items-center gap-4">
-              <div className="bg-white/10 p-3 rounded-lg border border-white/20">
-                <CheckCircle2 className="w-8 h-8 text-green-400" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold tracking-tight">CONTROL_APTITUD_PRESUPUESTARIA</h1>
-                <p className="text-green-200 text-xs font-medium uppercase tracking-widest opacity-80 italic">Ministerio de Infraestructura</p>
-              </div>
-            </div>
-            <button className="flex items-center gap-2 bg-green-600 hover:bg-green-700 px-5 py-2.5 rounded-lg transition text-sm font-semibold shadow-md active:scale-95">
-              <Download size={16} /> Descargar Reporte Completo
-            </button>
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6 font-sans">
+        <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl p-10 border border-slate-200">
+          <div className="w-20 h-20 bg-orange-100 rounded-3xl flex items-center justify-center mx-auto mb-8">
+            <Database className="w-10 h-10 text-orange-600" />
           </div>
-
-          {/* Panel de Filtros Original */}
-          <div className="bg-white border-x border-b border-gray-200 p-6 shadow-sm flex flex-col md:flex-row gap-4">
-            <div className="relative flex-1">
-              <label className="block text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider ml-1">Seleccionar Licitación / Obra</label>
-              <button 
-                onClick={() => { setIsNombreOpen(!isNombreOpen); setIsVeredictoOpen(false); }}
-                className={`w-full flex items-center justify-between px-4 py-2 border rounded-lg bg-white transition-all ${isNombreOpen ? 'ring-2 ring-[#1f4e3d] border-[#1f4e3d]' : 'border-gray-200 hover:border-gray-300'}`}
-              >
-                <span className="text-xs truncate font-semibold text-gray-700">
-                  {selectedNombres.length === 0 ? 'Todas las Obras' : `${selectedNombres.length} seleccionadas`}
-                </span>
-                <ChevronDown size={16} className={`text-gray-400 transition-transform ${isNombreOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {isNombreOpen && (
-                <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl p-2 max-h-80 overflow-y-auto">
-                  <div className="sticky top-0 bg-white pb-2 mb-2 border-b border-gray-100 flex justify-between px-2">
-                    <button onClick={() => setSelectedNombres([])} className="text-[10px] font-bold text-red-500 uppercase hover:underline">Limpiar</button>
-                    <button onClick={() => setIsNombreOpen(false)} className="text-[10px] font-bold text-[#1f4e3d] uppercase hover:underline">Listo</button>
-                  </div>
-                  {nombresUnicos.map(n => (
-                    <div key={n} onClick={() => handleToggle(selectedNombres, setSelectedNombres, n)} className={`flex items-center gap-3 p-2 rounded-md cursor-pointer transition-colors ${selectedNombres.includes(n) ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
-                      <div className={`w-4 h-4 border rounded flex items-center justify-center transition-all ${selectedNombres.includes(n) ? 'bg-[#1f4e3d] border-[#1f4e3d]' : 'border-gray-300'}`}>
-                        {selectedNombres.includes(n) && <Check size={12} className="text-white" />}
-                      </div>
-                      <span className={`text-[11px] ${selectedNombres.includes(n) ? 'font-bold text-[#1f4e3d]' : 'text-gray-600'}`}>{n}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="relative w-full md:w-72">
-              <label className="block text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider ml-1">Estado de Aptitud</label>
-              <button 
-                onClick={() => { setIsVeredictoOpen(!isVeredictoOpen); setIsNombreOpen(false); }}
-                className={`w-full flex items-center justify-between px-4 py-2 border rounded-lg bg-white transition-all ${isVeredictoOpen ? 'ring-2 ring-[#1f4e3d] border-[#1f4e3d]' : 'border-gray-200 hover:border-gray-300'}`}
-              >
-                <span className="text-xs font-semibold text-gray-700">
-                  {selectedVeredictos.length === 0 ? 'Todos los Estados' : `${selectedVeredictos.length} seleccionados`}
-                </span>
-                <ChevronDown size={16} className={`text-gray-400 transition-transform ${isVeredictoOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {isVeredictoOpen && (
-                <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl p-2">
-                  {veredictosUnicos.map(v => (
-                    <div key={v} onClick={() => handleToggle(selectedVeredictos, setSelectedVeredictos, v)} className={`flex items-center gap-3 p-2 rounded-md cursor-pointer transition-colors ${selectedVeredictos.includes(v) ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
-                      <div className={`w-4 h-4 border rounded flex items-center justify-center transition-all ${selectedVeredictos.includes(v) ? 'bg-[#1f4e3d] border-[#1f4e3d]' : 'border-gray-300'}`}>
-                        {selectedVeredictos.includes(v) && <Check size={12} className="text-white" />}
-                      </div>
-                      <span className={`text-[11px] ${selectedVeredictos.includes(v) ? 'font-bold text-[#1f4e3d]' : 'text-gray-600'}`}>{v}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Tabla principal Original */}
-          <div className="bg-white rounded-b-xl shadow-xl overflow-hidden border-x border-b border-gray-200">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="p-4 text-left text-[11px] font-bold text-[#1f4e3d] uppercase tracking-wider">Nombre del Archivo / Licitación</th>
-                    <th className="p-4 text-right text-[11px] font-bold text-[#1f4e3d] uppercase tracking-wider w-44">Monto de la Oferta</th>
-                    <th className="p-4 text-center text-[11px] font-bold text-[#1f4e3d] uppercase tracking-wider w-36">Desvío (%)</th>
-                    <th className="p-4 text-center text-[11px] font-bold text-[#1f4e3d] uppercase tracking-wider w-64">Veredicto Final</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filteredData.length > 0 ? (
-                    filteredData.map((item) => (
-                      <tr 
-                        key={item.id} 
-                        onClick={() => handleRowClick(item)}
-                        className="hover:bg-blue-50/80 cursor-pointer transition-colors group"
-                      >
-                        <td className="p-4">
-                          <div className="flex items-center gap-3">
-                            <div className="bg-gray-100 p-2 rounded text-gray-400 group-hover:text-blue-500 transition-colors">
-                              <AlertCircle size={14} />
-                            </div>
-                            <span className="text-xs text-gray-700 font-medium truncate max-w-sm group-hover:text-blue-700 transition-colors">{item.nombre}</span>
-                          </div>
-                        </td>
-                        <td className="p-4 text-right">
-                          <span className="text-xs font-bold text-gray-800 tabular-nums">
-                            {formatCurrency(item.monto)}
-                          </span>
-                        </td>
-                        <td className="p-4 text-center">
-                          <span className={`text-xs font-black tabular-nums ${item.desvio <= 5 ? 'text-green-600' : item.desvio <= 20 ? 'text-amber-600' : 'text-red-600'}`}>
-                            {item.desvio > 0 ? '+' : ''}{item.desvio.toFixed(2)}%
-                          </span>
-                        </td>
-                        <td className="p-4 text-center">
-                          <span className={`inline-block w-full px-3 py-1.5 rounded text-[10px] font-black uppercase border shadow-sm ${getStatusStyles(item.veredicto)}`}>
-                            {item.veredicto}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan="4" className="p-24 text-center text-gray-400 font-bold uppercase tracking-widest opacity-40">
-                        <Filter size={48} className="mx-auto mb-2" /> Sin Coincidencias
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Footer de Resumen Original */}
-            <div className="bg-[#f8fafc] p-6 border-t border-gray-200 flex flex-col md:flex-row justify-between items-center gap-6">
-              <div className="flex gap-8">
-                <div className="text-center">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total Analizado</p>
-                  <p className="text-xl font-black text-[#1f4e3d]">{filteredData.length}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Suma de Ofertas</p>
-                  <p className="text-xl font-black text-[#1f4e3d]">
-                    {formatCurrency(filteredData.reduce((acc, curr) => acc + curr.monto, 0))}
-                  </p>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="px-3 py-1 border-l-4 border-[#92d050] bg-white shadow-sm">
-                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">Aptos</p>
-                  <p className="text-sm font-black text-green-700">{filteredData.filter(d => d.veredicto.includes('APTO')).length}</p>
-                </div>
-                <div className="px-3 py-1 border-l-4 border-[#ffc000] bg-white shadow-sm">
-                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">Obs.</p>
-                  <p className="text-sm font-black text-amber-700">{filteredData.filter(d => d.veredicto.includes('OBSERVACIÓN')).length}</p>
-                </div>
-                <div className="px-3 py-1 border-l-4 border-[#ff0000] bg-white shadow-sm">
-                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">No Aptos</p>
-                  <p className="text-sm font-black text-red-700">{filteredData.filter(d => d.veredicto.includes('NO APTO')).length}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-          <p className="mt-4 text-[10px] text-gray-400 text-center uppercase tracking-[0.2em]">
-            Este reporte es de carácter interno y requiere validación del SIGOP para su aprobación final.
+          <h1 className="text-2xl font-black text-slate-800 text-center mb-4 italic">Casi listo</h1>
+          <p className="text-slate-500 text-center mb-8 leading-relaxed font-medium">
+            Para que la conexión funcione, asegúrate de que en Vercel los nombres sean exactamente estos:
           </p>
+          
+          <div className="space-y-3 mb-8 font-mono text-xs">
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center">
+              <span className="font-bold text-slate-400">URL:</span>
+              <span className="text-blue-600 font-bold">VITE_SUPABASE_URL</span>
+            </div>
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex justify-between items-center">
+              <span className="font-bold text-slate-400">KEY:</span>
+              <span className="text-blue-600 font-bold">VITE_SUPABASE_ANON_KEY</span>
+            </div>
+          </div>
+
+          <p className="text-[10px] text-red-500 text-center mb-4 font-bold uppercase tracking-wider">
+            ⚠️ Nota: En tu captura pusiste "ANON_URL" en lugar de "ANON_KEY"
+          </p>
+
+          <a href="https://supabase.com/dashboard" target="_blank" className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-black transition-all">
+            Abrir Supabase <ExternalLink size={18} />
+          </a>
         </div>
       </div>
     );
   }
 
-  // VISTA DE DETALLE (BASADA EN LAS CAPTURAS)
   return (
-    <div className="min-h-screen bg-[#f3f4f6] p-4 md:p-8 font-sans">
-      <div className="max-w-6xl mx-auto">
-        <div className="mb-6 flex items-center justify-between">
-          <button 
-            onClick={() => setView('list')}
-            className="flex items-center gap-2 text-[#1f4e3d] hover:bg-[#1f4e3d] hover:text-white px-4 py-2 rounded-lg transition font-bold text-sm"
-          >
-            <ArrowLeft size={18} /> Volver al Listado
+    <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-900 overflow-hidden text-sm">
+      <aside className="w-24 lg:w-72 bg-white border-r border-slate-200 flex flex-col items-center lg:items-stretch">
+        <div className="p-8 lg:p-10 flex items-center gap-3 text-orange-600 font-black text-3xl italic">
+          <div className="bg-orange-600 p-2.5 rounded-2xl text-white shadow-lg shadow-orange-200">
+            <Target size={24} />
+          </div>
+          <span className="hidden lg:inline tracking-tighter">Validador.</span>
+        </div>
+        
+        <nav className="flex-1 px-4 lg:px-6 space-y-2">
+          <button className="w-full flex items-center justify-center lg:justify-start gap-4 px-4 lg:px-6 py-4 text-orange-600 bg-orange-50 rounded-3xl font-black">
+            <LayoutGrid size={22} /> <span className="hidden lg:inline">Proyectos</span>
           </button>
-          <div className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase shadow-sm ${getStatusStyles(selectedItem.veredicto)}`}>
-            {selectedItem.veredicto}
-          </div>
-        </div>
+          <button className="w-full flex items-center justify-center lg:justify-start gap-4 px-4 lg:px-6 py-4 text-slate-400 hover:text-slate-600 rounded-3xl font-bold">
+            <Briefcase size={22} /> <span className="hidden lg:inline">Historial</span>
+          </button>
+          <button className="w-full flex items-center justify-center lg:justify-start gap-4 px-4 lg:px-6 py-4 text-slate-400 hover:text-slate-600 rounded-3xl font-bold">
+            <Settings size={22} /> <span className="hidden lg:inline">Ajustes</span>
+          </button>
+        </nav>
 
-        {/* Info General (Captura 1) */}
-        <div className="bg-white rounded-xl shadow-md overflow-hidden mb-6 border border-gray-200">
-          <div className="bg-gray-50 px-6 py-3 border-b flex items-center gap-2">
-            <Building2 size={18} className="text-[#1f4e3d]" />
-            <h2 className="text-xs font-bold text-[#1f4e3d] uppercase tracking-wider">Datos Técnicos del Presupuesto</h2>
-          </div>
-          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4">
-            <div className="space-y-3">
-              <div className="flex justify-between border-b border-gray-100 pb-2">
-                <span className="text-[9px] font-bold text-gray-400 uppercase">Comitente</span>
-                <span className="text-xs font-bold text-gray-700 text-right">{selectedItem.comitente}</span>
-              </div>
-              <div className="flex justify-between border-b border-gray-100 pb-2">
-                <span className="text-[9px] font-bold text-gray-400 uppercase">Obra</span>
-                <span className="text-xs font-black text-[#1f4e3d] text-right">{selectedItem.nombre.split(' - ')[1] || 'ESCUELA DE REFERENCIA'}</span>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <div className="flex justify-between border-b border-gray-100 pb-2">
-                <span className="text-[9px] font-bold text-gray-400 uppercase">Empresa Constructora</span>
-                <span className="text-xs font-black text-gray-800 text-right">{selectedItem.empresa}</span>
-              </div>
-              <div className="flex justify-between border-b border-gray-100 pb-2">
-                <span className="text-[9px] font-bold text-gray-400 uppercase">Oferta Económica</span>
-                <span className="text-sm font-black text-[#1f4e3d]">{formatCurrency(selectedItem.monto)}</span>
-              </div>
-            </div>
-          </div>
+        <div className="p-6 lg:p-8">
+          <button className="w-full flex items-center justify-center lg:justify-start gap-4 px-4 lg:px-6 py-4 text-slate-400 hover:text-red-500 rounded-3xl font-black">
+            <LogOut size={22} /> <span className="hidden lg:inline">Salir</span>
+          </button>
         </div>
+      </aside>
 
-        {/* Tabla Detalle Ítems (Captura 3) */}
-        <div className="bg-white rounded-xl shadow-xl overflow-hidden border border-gray-200">
-          <div className="bg-[#1f4e3d] px-6 py-4 flex justify-between items-center">
-            <div className="flex items-center gap-3">
-              <FileText size={18} className="text-green-400" />
-              <h3 className="text-white text-xs font-bold uppercase tracking-widest">Desglose Comparativo de Costos</h3>
-            </div>
-            <div className="flex items-center gap-2 bg-white/10 px-3 py-1 rounded text-white text-xs font-bold">
-               <TrendingUp size={14} className={selectedItem.desvio > 0 ? "text-red-400" : "text-green-400"} />
-               Desvío de Oferta: {selectedItem.desvio}%
-            </div>
+      <main className="flex-1 flex flex-col h-full overflow-hidden">
+        <header className="h-28 bg-white/80 backdrop-blur-xl border-b border-slate-200 flex items-center justify-between px-10 sticky top-0 z-40">
+          <div className="relative w-full max-w-xl">
+            <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
+            <input 
+              type="text"
+              placeholder="Buscar proyecto..."
+              className="w-full pl-16 pr-8 py-4 bg-slate-50 border-none rounded-[1.5rem] focus:ring-4 focus:ring-orange-100 outline-none transition-all text-slate-700 font-bold"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
           </div>
           
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="p-4 text-left text-[9px] font-black text-gray-500 uppercase">Ítem / Designación de Tareas</th>
-                  <th className="p-4 text-right text-[9px] font-black text-gray-500 uppercase">Unit. Maestro</th>
-                  <th className="p-4 text-right text-[9px] font-black text-gray-500 uppercase">Unit. Cotizado</th>
-                  <th className="p-4 text-right text-[9px] font-black text-gray-500 uppercase">Diferencia</th>
-                  <th className="p-4 text-center text-[9px] font-black text-gray-500 uppercase">Desvío %</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {budgetItems.map((bi, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                    <td className="p-4 max-w-sm">
-                      <p className="text-[10px] font-medium text-gray-700 leading-tight">{bi.item}</p>
-                    </td>
-                    <td className="p-4 text-right text-[10px] text-gray-400 font-medium">{formatCurrency(bi.maestro)}</td>
-                    <td className="p-4 text-right text-[10px] font-bold text-gray-800">{formatCurrency(bi.cotizado)}</td>
-                    <td className="p-4 text-right text-[10px] font-medium text-gray-600">
-                      {bi.dif > 0 ? '+' : ''}{formatCurrency(bi.dif)}
-                    </td>
-                    <td className="p-4 text-center">
-                      <div className={`inline-block px-2 py-0.5 rounded text-[9px] font-black border ${
-                        bi.desvio > 20 ? 'bg-red-50 text-red-700 border-red-200' : 
-                        bi.desvio < 0 ? 'bg-green-50 text-green-700 border-green-200' : 
-                        'bg-gray-50 text-gray-600 border-gray-200'
-                      }`}>
-                        {bi.desvio > 0 ? '+' : ''}{bi.desvio.toFixed(2)}%
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="bg-gray-50 p-4 border-t border-gray-200 flex justify-end gap-6 items-center">
-             <div className="text-right">
-                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Estado de Análisis</p>
-                <p className={`text-xs font-black uppercase ${selectedItem.desvio > 20 ? 'text-red-600' : 'text-green-700'}`}>
-                  {selectedItem.veredicto}
-                </p>
-             </div>
-             <button className="bg-[#1f4e3d] text-white px-5 py-2 rounded font-bold text-[10px] uppercase hover:bg-black transition shadow-sm">
-               Descargar XML Presupuestario
+          <div className="flex items-center gap-6 ml-8">
+             <button onClick={fetchData} className="p-4 text-slate-300 hover:text-orange-600 transition-all rounded-2xl hover:bg-orange-50">
+               <RefreshCw size={22} className={loading ? "animate-spin" : ""} />
+             </button>
+             <button className="flex items-center gap-3 bg-slate-900 hover:bg-black text-white px-8 py-4 rounded-2xl font-black shadow-xl shadow-slate-200 active:scale-95 whitespace-nowrap">
+                <Plus size={20} /> <span className="hidden sm:inline">Nuevo Proyecto</span>
              </button>
           </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-10">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center h-full">
+              <div className="w-12 h-12 border-4 border-orange-100 border-t-orange-600 rounded-full animate-spin mb-4"></div>
+              <p className="text-slate-400 font-black italic uppercase text-[10px] tracking-widest">Conectando con Supabase...</p>
+            </div>
+          ) : error ? (
+            <div className="max-w-2xl mx-auto bg-white border border-red-100 p-10 rounded-[3rem] shadow-2xl shadow-red-50 text-center">
+              <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-6 mx-auto">
+                <AlertCircle size={32} />
+              </div>
+              <h3 className="font-black text-slate-800 text-2xl italic mb-4">Error de conexión</h3>
+              <p className="text-slate-500 font-medium mb-8 text-xs font-mono bg-slate-50 p-4 rounded-xl">{error}</p>
+              <button onClick={fetchData} className="px-8 py-4 bg-red-600 text-white rounded-2xl font-black shadow-lg shadow-red-200">Reintentar</button>
+            </div>
+          ) : (
+            <div className="max-w-7xl mx-auto">
+              <div className="mb-12">
+                <h2 className="text-6xl font-black text-slate-900 tracking-tighter mb-4 italic">Hola Facundo.</h2>
+                <p className="text-slate-400 font-bold flex items-center gap-3">
+                  <span className="inline-block w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
+                  Visualizando <span className="text-orange-600 font-black">{datos.length} proyectos</span> desde tu DB
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-8">
+                {filteredData.map((item) => (
+                  <div 
+                    key={item.id}
+                    onClick={() => setSelectedItem(item)}
+                    className="group bg-white rounded-[3rem] p-10 border border-slate-100 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-500 cursor-pointer overflow-hidden"
+                  >
+                    <div className="flex justify-between items-start mb-10">
+                      <div className="bg-slate-50 text-slate-400 px-4 py-2 rounded-xl text-[10px] font-black tracking-widest uppercase">
+                        ID: {item.id}
+                      </div>
+                      <div className={`p-3 rounded-2xl ${parseFloat(item.desviacion) >= 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                        {parseFloat(item.desviacion) >= 0 ? <TrendingDown size={20} /> : <TrendingUp size={20} />}
+                      </div>
+                    </div>
+
+                    <h3 className="text-3xl font-black text-slate-900 line-clamp-1 italic mb-8 group-hover:text-orange-600">{item.proyecto}</h3>
+                    
+                    <div className="grid grid-cols-2 gap-6 mb-10">
+                      <div className="bg-slate-50 p-6 rounded-[2rem]">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Presupuestado</p>
+                        <p className="text-xl font-black text-slate-800">{fmt(item.presupuestado)}</p>
+                      </div>
+                      <div className="bg-slate-50 p-6 rounded-[2rem]">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Ejecutado</p>
+                        <p className="text-xl font-black text-slate-800">{fmt(item.ejecutado)}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 text-slate-400 text-[11px] font-black uppercase pt-8 border-t border-slate-50">
+                      <Calendar size={14} className="text-orange-600" /> {new Date(item.created_at).toLocaleDateString()}
+                      <div className="ml-auto flex items-center gap-2 group-hover:translate-x-2 transition-transform">
+                        Detalles <ChevronRight size={16} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+      </main>
+
+      {selectedItem && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 z-[100] animate-in fade-in duration-300">
+          <div className="bg-white rounded-[4rem] max-w-3xl w-full p-16 shadow-2xl relative overflow-hidden">
+            <button onClick={() => setSelectedItem(null)} className="absolute top-12 right-12 w-14 h-14 flex items-center justify-center bg-slate-50 rounded-2xl text-slate-400">✕</button>
+            <h2 className="text-6xl font-black text-slate-900 tracking-tighter italic mb-12">{selectedItem.proyecto}</h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-16 text-center">
+               <div className="p-8 bg-slate-50 rounded-[2.5rem]">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Presupuestado</p>
+                  <p className="text-2xl font-black text-slate-800 tracking-tighter">{fmt(selectedItem.presupuestado)}</p>
+               </div>
+               <div className="p-8 bg-slate-50 rounded-[2.5rem]">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Ejecutado</p>
+                  <p className="text-2xl font-black text-slate-800 tracking-tighter">{fmt(selectedItem.ejecutado)}</p>
+               </div>
+               <div className={`p-8 rounded-[2.5rem] ${parseFloat(selectedItem.desviacion) >= 0 ? 'bg-green-50' : 'bg-red-50'}`}>
+                  <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${parseFloat(selectedItem.desviacion) >= 0 ? 'text-green-600' : 'text-red-600'}`}>Desviación</p>
+                  <p className={`text-2xl font-black ${parseFloat(selectedItem.desviacion) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                    {parseFloat(selectedItem.desviacion) >= 0 ? '+' : ''}{selectedItem.desviacion}%
+                  </p>
+               </div>
+            </div>
+
+            <div className="flex gap-4">
+              <button onClick={() => setSelectedItem(null)} className="flex-1 py-6 bg-slate-100 rounded-3xl font-black">Cerrar</button>
+              <button className="flex-[2] py-6 bg-slate-900 text-white rounded-3xl font-black shadow-2xl flex items-center justify-center gap-3">
+                Exportar Reporte <ExternalLink size={20} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
