@@ -1,4 +1,17 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  onSnapshot, 
+  query, 
+  doc, 
+  setDoc,
+  signInAnonymously,
+  getAuth,
+  onAuthStateChanged,
+  signInWithCustomToken
+} from 'firebase/firestore';
 import { 
   ChevronDown, 
   Download, 
@@ -10,226 +23,399 @@ import {
   Building2,
   FileText,
   TrendingUp,
-  Plus,
-  Loader2,
-  Trash2,
-  Database
+  Loader2
 } from 'lucide-react';
 
-// Importación de Supabase vía CDN para evitar errores de compilación local/Vercel
-// Nota: En un entorno local usarías 'import { createClient } from "@supabase/supabase-js"'
-const SUPABASE_URL = ""; // Tu URL de Supabase
-const SUPABASE_ANON_KEY = ""; // Tu Anon Key de Supabase
-const GEMINI_API_KEY = ""; // Se inyecta automáticamente en este entorno
+// --- CONFIGURACIÓN FIREBASE ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 const App = () => {
   const [view, setView] = useState('list');
   const [selectedItem, setSelectedItem] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [data, setData] = useState([]);
-  const [supabase, setSupabase] = useState(null);
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const fileInputRef = useRef(null);
+  const [data, setData] = useState([]);
 
-  // Inicializar Cliente Supabase
+  // --- AUTENTICACIÓN ---
   useEffect(() => {
-    const initSupabase = async () => {
+    const initAuth = async () => {
       try {
-        // Cargamos el script de Supabase dinámicamente si no existe
-        if (!window.supabase) {
-          const script = document.createElement('script');
-          script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-          script.async = true;
-          script.onload = () => {
-            const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-            setSupabase(client);
-          };
-          document.head.appendChild(script);
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
         } else {
-          const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-          setSupabase(client);
+          await signInAnonymously(auth);
         }
       } catch (error) {
-        console.error("Error inicializando Supabase:", error);
+        console.error("Error de autenticación:", error);
       }
     };
-    initSupabase();
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
   }, []);
 
-  // Cargar datos desde Supabase
+  // --- CARGA DE DATOS DESDE CLOUD ---
   useEffect(() => {
-    if (!supabase) return;
+    if (!user) return;
 
-    const fetchBudgets = async () => {
-      setLoading(true);
-      const { data: budgets, error } = await supabase
-        .from('presupuestos') // Asegúrate que tu tabla se llame así
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error("Error fetching data:", error);
-      } else {
-        setData(budgets || []);
-      }
-      setLoading(false);
-    };
-
-    fetchBudgets();
-
-    // Suscripción en tiempo real
-    const channel = supabase
-      .channel('schema-db-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'presupuestos' }, (payload) => {
-        fetchBudgets();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [supabase]);
-
-  // Lógica de carga y análisis con IA
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file || !supabase) return;
-
-    setIsProcessing(true);
+    // Referencia a la colección pública según REGLA 1
+    const publicDataRef = collection(db, 'artifacts', appId, 'public', 'data', 'presupuestos');
     
-    // Simulación de análisis de IA (Gemini)
-    const prompt = `Analiza el nombre del archivo: "${file.name}" y genera un JSON con: nombre_obra, empresa, monto (numero), veredicto ('APTO', 'OBSERVADO', 'NO APTO').`;
+    const unsubscribe = onSnapshot(query(publicDataRef), 
+      (snapshot) => {
+        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Si no hay datos, podríamos inicializarlos por primera vez (opcional)
+        setData(docs);
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Error al leer Firestore:", error);
+        setLoading(false);
+      }
+    );
 
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json" }
-        })
-      });
+    return () => unsubscribe();
+  }, [user]);
 
-      const result = await response.json();
-      const extracted = JSON.parse(result.candidates[0].content.parts[0].text);
-      
-      const { error } = await supabase
-        .from('presupuestos')
-        .insert([{
-          nombre: extracted.nombre_obra || file.name,
-          monto: Number(extracted.monto) || 0,
-          veredicto: extracted.veredicto || 'APTO',
-          empresa: extracted.empresa || 'Desconocida',
-          created_at: new Date()
-        }]);
+  // --- FILTROS Y ESTADOS ---
+  const [selectedNombres, setSelectedNombres] = useState([]);
+  const [selectedVeredictos, setSelectedVeredictos] = useState([]);
+  const [isNombreOpen, setIsNombreOpen] = useState(false);
+  const [isVeredictoOpen, setIsVeredictoOpen] = useState(false);
 
-      if (error) throw error;
+  const nombresUnicos = useMemo(() => [...new Set(data.map(item => item.nombre))].sort(), [data]);
+  const veredictosUnicos = [
+    'APTO (En Rango)',
+    'EN OBSERVACIÓN (Requiere Justificación)',
+    'NO APTO (Fuera de Rango / Sobrevaluado)'
+  ];
 
-    } catch (err) {
-      console.error("Error procesando:", err);
-    } finally {
-      setIsProcessing(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+  const formatCurrency = (val) => {
+    return new Intl.NumberFormat('es-AR', {
+      style: 'currency',
+      currency: 'ARS',
+      minimumFractionDigits: 2
+    }).format(val);
+  };
+
+  const handleToggle = (list, setList, value) => {
+    if (list.includes(value)) {
+      setList(list.filter(item => item !== value));
+    } else {
+      setList([...list, value]);
     }
   };
 
-  const deleteBudget = async (id, e) => {
-    e.stopPropagation();
-    if (!supabase) return;
-    const { error } = await supabase.from('presupuestos').delete().eq('id', id);
-    if (error) console.error("Error deleting:", error);
-  };
-
-  const formatCurrency = (val) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(val);
+  const filteredData = useMemo(() => {
+    return data.filter(item => {
+      const matchNombre = selectedNombres.length === 0 || selectedNombres.includes(item.nombre);
+      const matchVeredicto = selectedVeredictos.length === 0 || selectedVeredictos.includes(item.veredicto);
+      return matchNombre && matchVeredicto;
+    });
+  }, [data, selectedNombres, selectedVeredictos]);
 
   const getStatusStyles = (veredicto) => {
-    if (veredicto === 'APTO') return 'bg-green-100 text-green-800 border-green-200';
-    if (veredicto === 'OBSERVADO') return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-    return 'bg-red-100 text-red-800 border-red-200';
+    if (!veredicto) return 'bg-gray-100 text-gray-500 border-gray-200';
+    if (veredicto.includes('APTO (En Rango)')) return 'bg-[#c6efce] text-[#006100] border-[#92d050]';
+    if (veredicto.includes('EN OBSERVACIÓN')) return 'bg-[#ffeb9c] text-[#9c6500] border-[#ffc000]';
+    return 'bg-[#ffc7ce] text-[#9c0006] border-[#ff0000]';
   };
+
+  const handleRowClick = (item) => {
+    setSelectedItem(item);
+    setView('detail');
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#f3f4f6]">
+        <Loader2 className="animate-spin text-[#1f4e3d] mb-4" size={48} />
+        <p className="text-[#1f4e3d] font-bold uppercase tracking-widest text-sm">Sincronizando con Base de Datos...</p>
+      </div>
+    );
+  }
 
   if (view === 'list') {
     return (
-      <div className="min-h-screen bg-gray-50 p-4 md:p-8">
-        <div className="max-w-6xl mx-auto">
-          {/* Header */}
-          <div className="bg-[#1e3a8a] text-white p-6 rounded-t-xl flex flex-col md:flex-row justify-between items-center gap-4 shadow-lg">
-            <div className="flex items-center gap-3">
-              <Database className="text-blue-300" />
+      <div className="min-h-screen bg-[#f3f4f6] p-4 md:p-8 font-sans text-gray-800">
+        <div className="max-w-7xl mx-auto">
+          {/* Header Superior - DISEÑO VERDE RESTAURADO */}
+          <div className="bg-[#1f4e3d] text-white p-6 rounded-t-xl shadow-lg flex flex-col md:flex-row justify-between items-center gap-4">
+            <div className="flex items-center gap-4">
+              <div className="bg-white/10 p-3 rounded-lg border border-white/20">
+                <CheckCircle2 className="w-8 h-8 text-green-400" />
+              </div>
               <div>
-                <h1 className="text-xl font-bold uppercase tracking-tight">Validador de Presupuestos</h1>
-                <p className="text-xs text-blue-200 opacity-80 uppercase">Conectado a Supabase</p>
+                <h1 className="text-xl font-bold tracking-tight uppercase">Control de Aptitud Presupuestaria</h1>
+                <p className="text-green-200 text-xs font-medium uppercase tracking-widest opacity-80 italic">Ministerio de Infraestructura | Cloud Enabled</p>
               </div>
             </div>
-            <div className="flex gap-2">
-              <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isProcessing || !supabase}
-                className="bg-white text-[#1e3a8a] px-4 py-2 rounded-lg font-bold text-sm hover:bg-blue-50 transition flex items-center gap-2 disabled:opacity-50"
-              >
-                {isProcessing ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}
-                Cargar Archivo
-              </button>
+            <div className="flex items-center gap-3">
+               <span className="text-[10px] text-green-200/50 font-bold uppercase">ID: {user?.uid.substring(0,8)}...</span>
+               <button className="flex items-center gap-2 bg-green-600 hover:bg-green-700 px-5 py-2.5 rounded-lg transition text-sm font-semibold shadow-md active:scale-95">
+                 <Download size={16} /> Descargar Reporte
+               </button>
             </div>
           </div>
 
-          {/* Tabla */}
-          <div className="bg-white rounded-b-xl shadow-md overflow-hidden">
-            {loading ? (
-              <div className="p-20 text-center text-gray-400">
-                <Loader2 className="animate-spin mx-auto mb-4" />
-                Cargando desde Supabase...
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="bg-gray-50 border-b text-[10px] font-bold text-gray-500 uppercase">
-                    <tr>
-                      <th className="p-4">Obra / Empresa</th>
-                      <th className="p-4">Monto</th>
-                      <th className="p-4 text-center">Veredicto</th>
-                      <th className="p-4 text-right">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {data.map((item) => (
-                      <tr key={item.id} className="hover:bg-blue-50/30 transition-colors cursor-pointer group">
+          {/* Filtros */}
+          <div className="bg-white border-x border-b border-gray-200 p-6 shadow-sm flex flex-col md:flex-row gap-4">
+            <div className="relative flex-1">
+              <label className="block text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider ml-1">Seleccionar Licitación / Obra</label>
+              <button 
+                onClick={() => { setIsNombreOpen(!isNombreOpen); setIsVeredictoOpen(false); }}
+                className={`w-full flex items-center justify-between px-4 py-2 border rounded-lg bg-white transition-all ${isNombreOpen ? 'ring-2 ring-[#1f4e3d] border-[#1f4e3d]' : 'border-gray-200 hover:border-gray-300'}`}
+              >
+                <span className="text-xs truncate font-semibold text-gray-700">
+                  {selectedNombres.length === 0 ? 'Todas las Obras' : `${selectedNombres.length} seleccionadas`}
+                </span>
+                <ChevronDown size={16} className={`text-gray-400 transition-transform ${isNombreOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {isNombreOpen && (
+                <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl p-2 max-h-80 overflow-y-auto">
+                  <div className="sticky top-0 bg-white pb-2 mb-2 border-b border-gray-100 flex justify-between px-2">
+                    <button onClick={() => setSelectedNombres([])} className="text-[10px] font-bold text-red-500 uppercase hover:underline">Limpiar</button>
+                    <button onClick={() => setIsNombreOpen(false)} className="text-[10px] font-bold text-[#1f4e3d] uppercase hover:underline">Listo</button>
+                  </div>
+                  {nombresUnicos.map(n => (
+                    <div key={n} onClick={() => handleToggle(selectedNombres, setSelectedNombres, n)} className={`flex items-center gap-3 p-2 rounded-md cursor-pointer transition-colors ${selectedNombres.includes(n) ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
+                      <div className={`w-4 h-4 border rounded flex items-center justify-center transition-all ${selectedNombres.includes(n) ? 'bg-[#1f4e3d] border-[#1f4e3d]' : 'border-gray-300'}`}>
+                        {selectedNombres.includes(n) && <Check size={12} className="text-white" />}
+                      </div>
+                      <span className={`text-[11px] ${selectedNombres.includes(n) ? 'font-bold text-[#1f4e3d]' : 'text-gray-600'}`}>{n}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="relative w-full md:w-72">
+              <label className="block text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider ml-1">Estado de Aptitud</label>
+              <button 
+                onClick={() => { setIsVeredictoOpen(!isVeredictoOpen); setIsNombreOpen(false); }}
+                className={`w-full flex items-center justify-between px-4 py-2 border rounded-lg bg-white transition-all ${isVeredictoOpen ? 'ring-2 ring-[#1f4e3d] border-[#1f4e3d]' : 'border-gray-200 hover:border-gray-300'}`}
+              >
+                <span className="text-xs font-semibold text-gray-700">
+                  {selectedVeredictos.length === 0 ? 'Todos los Estados' : `${selectedVeredictos.length} seleccionados`}
+                </span>
+                <ChevronDown size={16} className={`text-gray-400 transition-transform ${isVeredictoOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {isVeredictoOpen && (
+                <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-xl p-2">
+                  {veredictosUnicos.map(v => (
+                    <div key={v} onClick={() => handleToggle(selectedVeredictos, setSelectedVeredictos, v)} className={`flex items-center gap-3 p-2 rounded-md cursor-pointer transition-colors ${selectedVeredictos.includes(v) ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
+                      <div className={`w-4 h-4 border rounded flex items-center justify-center transition-all ${selectedVeredictos.includes(v) ? 'bg-[#1f4e3d] border-[#1f4e3d]' : 'border-gray-300'}`}>
+                        {selectedVeredictos.includes(v) && <Check size={12} className="text-white" />}
+                      </div>
+                      <span className={`text-[11px] ${selectedVeredictos.includes(v) ? 'font-bold text-[#1f4e3d]' : 'text-gray-600'}`}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Tabla principal */}
+          <div className="bg-white rounded-b-xl shadow-xl overflow-hidden border-x border-b border-gray-200">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="p-4 text-left text-[11px] font-bold text-[#1f4e3d] uppercase tracking-wider">Nombre del Archivo / Licitación</th>
+                    <th className="p-4 text-right text-[11px] font-bold text-[#1f4e3d] uppercase tracking-wider w-44">Monto de la Oferta</th>
+                    <th className="p-4 text-center text-[11px] font-bold text-[#1f4e3d] uppercase tracking-wider w-36">Desvío (%)</th>
+                    <th className="p-4 text-center text-[11px] font-bold text-[#1f4e3d] uppercase tracking-wider w-64">Veredicto Final</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredData.length > 0 ? (
+                    filteredData.map((item) => (
+                      <tr 
+                        key={item.id} 
+                        onClick={() => handleRowClick(item)}
+                        className="hover:bg-blue-50/80 cursor-pointer transition-colors group"
+                      >
                         <td className="p-4">
-                          <div className="text-sm font-bold text-gray-800">{item.nombre}</div>
-                          <div className="text-[10px] text-gray-500">{item.empresa}</div>
+                          <div className="flex items-center gap-3">
+                            <div className="bg-gray-100 p-2 rounded text-gray-400 group-hover:text-blue-500 transition-colors">
+                              <AlertCircle size={14} />
+                            </div>
+                            <span className="text-xs text-gray-700 font-medium truncate max-w-sm group-hover:text-blue-700 transition-colors">{item.nombre}</span>
+                          </div>
                         </td>
-                        <td className="p-4 font-mono text-sm font-bold">{formatCurrency(item.monto)}</td>
+                        <td className="p-4 text-right">
+                          <span className="text-xs font-bold text-gray-800 tabular-nums">
+                            {formatCurrency(item.monto)}
+                          </span>
+                        </td>
                         <td className="p-4 text-center">
-                          <span className={`text-[9px] font-black px-2 py-1 rounded border uppercase ${getStatusStyles(item.veredicto)}`}>
+                          <span className={`text-xs font-black tabular-nums ${item.desvio <= 5 ? 'text-green-600' : item.desvio <= 20 ? 'text-amber-600' : 'text-red-600'}`}>
+                            {item.desvio > 0 ? '+' : ''}{item.desvio.toFixed(2)}%
+                          </span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <span className={`inline-block w-full px-3 py-1.5 rounded text-[10px] font-black uppercase border shadow-sm ${getStatusStyles(item.veredicto)}`}>
                             {item.veredicto}
                           </span>
                         </td>
-                        <td className="p-4 text-right">
-                          <button onClick={(e) => deleteBudget(item.id, e)} className="text-gray-300 hover:text-red-500 transition-colors">
-                            <Trash2 size={16} />
-                          </button>
-                        </td>
                       </tr>
-                    ))}
-                    {data.length === 0 && (
-                      <tr>
-                        <td colSpan="4" className="p-10 text-center text-gray-400 text-sm italic">
-                          No hay registros en la base de datos de Supabase.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="4" className="p-24 text-center text-gray-400 font-bold uppercase tracking-widest opacity-40">
+                        <Filter size={48} className="mx-auto mb-2" /> Sin Coincidencias
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer de Resumen */}
+            <div className="bg-[#f8fafc] p-6 border-t border-gray-200 flex flex-col md:flex-row justify-between items-center gap-6">
+              <div className="flex gap-8">
+                <div className="text-center">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total Analizado</p>
+                  <p className="text-xl font-black text-[#1f4e3d]">{filteredData.length}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Suma de Ofertas</p>
+                  <p className="text-xl font-black text-[#1f4e3d]">
+                    {formatCurrency(filteredData.reduce((acc, curr) => acc + curr.monto, 0))}
+                  </p>
+                </div>
               </div>
-            )}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="px-3 py-1 border-l-4 border-[#92d050] bg-white shadow-sm">
+                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">Aptos</p>
+                  <p className="text-sm font-black text-green-700">{filteredData.filter(d => d.veredicto?.includes('APTO')).length}</p>
+                </div>
+                <div className="px-3 py-1 border-l-4 border-[#ffc000] bg-white shadow-sm">
+                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">Obs.</p>
+                  <p className="text-sm font-black text-amber-700">{filteredData.filter(d => d.veredicto?.includes('OBSERVACIÓN')).length}</p>
+                </div>
+                <div className="px-3 py-1 border-l-4 border-[#ff0000] bg-white shadow-sm">
+                  <p className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">No Aptos</p>
+                  <p className="text-sm font-black text-red-700">{filteredData.filter(d => d.veredicto?.includes('NO APTO')).length}</p>
+                </div>
+              </div>
+            </div>
           </div>
+          <p className="mt-4 text-[10px] text-gray-400 text-center uppercase tracking-[0.2em]">
+            Base de Datos Sincronizada en Tiempo Real
+          </p>
         </div>
       </div>
     );
   }
 
-  return null; // Vista de detalle omitida para brevedad en esta corrección
+  // VISTA DE DETALLE - DISEÑO VERDE RESTAURADO
+  const budgetItems = [
+    { item: 'Limpieza de cubiertas de techo (superficie neta)', maestro: 653.82, cotizado: 2152.19, dif: 1498.37, desvio: 229.17 },
+    { item: 'Canaleta descarga pluvial de Chapa Gº n.º 25 - Desarrollo 0.33 m.', maestro: 57624.41, cotizado: 2110.40, dif: -55514.01, desvio: -96.34 },
+    { item: 'Desobstrucción de cañerías de desagüe cloacal y/o pluvial', maestro: 1860.86, cotizado: 4596.90, dif: 2736.04, desvio: 147.03 },
+    { item: 'Provisión y colocación de cámara de inspección 0.60x0.60', maestro: 280000.00, cotizado: 334140.00, dif: 54140.00, desvio: 19.33 },
+    { item: 'Colocación de tapas de Piletas de patios - B.A - B.C', maestro: 25157.88, cotizado: 287231.00, dif: 262073.12, desvio: 1041.71 },
+  ];
+
+  return (
+    <div className="min-h-screen bg-[#f3f4f6] p-4 md:p-8 font-sans">
+      <div className="max-w-6xl mx-auto">
+        <div className="mb-6 flex items-center justify-between">
+          <button 
+            onClick={() => setView('list')}
+            className="flex items-center gap-2 text-[#1f4e3d] hover:bg-[#1f4e3d] hover:text-white px-4 py-2 rounded-lg transition font-bold text-sm"
+          >
+            <ArrowLeft size={18} /> Volver al Listado
+          </button>
+          <div className={`px-4 py-2 rounded-full border text-[10px] font-black uppercase shadow-sm ${getStatusStyles(selectedItem.veredicto)}`}>
+            {selectedItem.veredicto}
+          </div>
+        </div>
+
+        {/* Info General */}
+        <div className="bg-white rounded-xl shadow-md overflow-hidden mb-6 border border-gray-200">
+          <div className="bg-gray-50 px-6 py-3 border-b flex items-center gap-2">
+            <Building2 size={18} className="text-[#1f4e3d]" />
+            <h2 className="text-xs font-bold text-[#1f4e3d] uppercase tracking-wider">Datos Técnicos del Presupuesto</h2>
+          </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4">
+            <div className="space-y-3">
+              <div className="flex justify-between border-b border-gray-100 pb-2">
+                <span className="text-[9px] font-bold text-gray-400 uppercase">Comitente</span>
+                <span className="text-xs font-bold text-gray-700 text-right">{selectedItem.comitente || 'N/A'}</span>
+              </div>
+              <div className="flex justify-between border-b border-gray-100 pb-2">
+                <span className="text-[9px] font-bold text-gray-400 uppercase">Obra</span>
+                <span className="text-xs font-black text-[#1f4e3d] text-right">{selectedItem.nombre.replace('.xlsx', '')}</span>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div className="flex justify-between border-b border-gray-100 pb-2">
+                <span className="text-[9px] font-bold text-gray-400 uppercase">Empresa Constructora</span>
+                <span className="text-xs font-black text-gray-800 text-right">{selectedItem.empresa || 'N/A'}</span>
+              </div>
+              <div className="flex justify-between border-b border-gray-100 pb-2">
+                <span className="text-[9px] font-bold text-gray-400 uppercase">Oferta Económica</span>
+                <span className="text-sm font-black text-[#1f4e3d]">{formatCurrency(selectedItem.monto)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Tabla Detalle Ítems */}
+        <div className="bg-white rounded-xl shadow-xl overflow-hidden border border-gray-200">
+          <div className="bg-[#1f4e3d] px-6 py-4 flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <FileText size={18} className="text-green-400" />
+              <h3 className="text-white text-xs font-bold uppercase tracking-widest">Desglose Comparativo</h3>
+            </div>
+            <div className="flex items-center gap-2 bg-white/10 px-3 py-1 rounded text-white text-xs font-bold">
+               <TrendingUp size={14} className={selectedItem.desvio > 0 ? "text-red-400" : "text-green-400"} />
+               Desvío: {selectedItem.desvio}%
+            </div>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="p-4 text-left text-[9px] font-black text-gray-500 uppercase">Ítem</th>
+                  <th className="p-4 text-right text-[9px] font-black text-gray-500 uppercase">Unit. Maestro</th>
+                  <th className="p-4 text-right text-[9px] font-black text-gray-500 uppercase">Unit. Cotizado</th>
+                  <th className="p-4 text-center text-[9px] font-black text-gray-500 uppercase">Desvío %</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {budgetItems.map((bi, idx) => (
+                  <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                    <td className="p-4">
+                      <p className="text-[10px] font-medium text-gray-700 leading-tight">{bi.item}</p>
+                    </td>
+                    <td className="p-4 text-right text-[10px] text-gray-400">{formatCurrency(bi.maestro)}</td>
+                    <td className="p-4 text-right text-[10px] font-bold text-gray-800">{formatCurrency(bi.cotizado)}</td>
+                    <td className="p-4 text-center">
+                      <div className={`inline-block px-2 py-0.5 rounded text-[9px] font-black border ${
+                        bi.desvio > 20 ? 'bg-red-50 text-red-700 border-red-200' : 
+                        bi.desvio < 0 ? 'bg-green-50 text-green-700 border-green-200' : 
+                        'bg-gray-50 text-gray-600 border-gray-200'
+                      }`}>
+                        {bi.desvio > 0 ? '+' : ''}{bi.desvio.toFixed(2)}%
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export default App;
