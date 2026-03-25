@@ -12,19 +12,21 @@ import {
   FileText,
   TrendingUp
 } from 'lucide-react';
- 
+
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
- 
+
 const App = () => {
   const [view, setView] = useState('list');
   const [selectedItem, setSelectedItem] = useState(null);
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
- 
+  const [budgetItems, setBudgetItems] = useState([]);
+  const [loadingItems, setLoadingItems] = useState(false);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -32,7 +34,6 @@ const App = () => {
           .from('presupuestos')
           .select('*')
           .order('created_at', { ascending: false });
- 
         if (fetchError) throw fetchError;
         setData(rows || []);
       } catch (err) {
@@ -43,47 +44,45 @@ const App = () => {
     };
     fetchData();
   }, []);
- 
-  const budgetItems = [
-    { item: 'Limpieza de cubiertas de techo (superficie neta)', maestro: 653.82, cotizado: 2152.19, dif: 1498.37, desvio: 229.17 },
-    { item: 'Canaleta descarga pluvial de Chapa Gº n.º 25 - Desarrollo 0.33 m.', maestro: 57624.41, cotizado: 2110.40, dif: -55514.01, desvio: -96.34 },
-    { item: 'Desobstrucción de cañerías de desagüe cloacal y/o pluvial', maestro: 1860.86, cotizado: 4596.90, dif: 2736.04, desvio: 147.03 },
-    { item: 'Provisión y colocación de cámara de inspección 0.60x0.60', maestro: 280000.00, cotizado: 334140.00, dif: 54140.00, desvio: 19.33 },
-    { item: 'Colocación de tapas de Piletas de patios - B.A - B.C', maestro: 25157.88, cotizado: 287231.00, dif: 262073.12, desvio: 1041.71 },
-    { item: 'Lavado y desinfección de Tanques de Reserva 1100 lts', maestro: 60173.60, cotizado: 53307.00, dif: -6866.60, desvio: -11.41 },
-    { item: 'Reemplazo de Tapa de tanque de reserva de P.R.F.V de 1100 lts', maestro: 21254.93, cotizado: 31949.40, dif: 10694.47, desvio: 50.32 },
-    { item: 'Provisión y colocación de flexible para inodoro (entramado metalico)', maestro: 9013.50, cotizado: 86928.00, dif: 77914.50, desvio: 864.42 },
-    { item: 'Provisión y colocación de O ring de goma + Tornillo de fijación', maestro: 19916.63, cotizado: 518942.55, dif: 499025.92, desvio: 2505.57 },
-  ];
- 
+
+  const fetchItems = async (nombre) => {
+    setLoadingItems(true);
+    setBudgetItems([]);
+    try {
+      const { data: items, error: fetchError } = await supabase
+        .from('items_presupuesto')
+        .select('*')
+        .eq('presupuesto_nombre', nombre)
+        .order('id', { ascending: true });
+      if (fetchError) throw fetchError;
+      setBudgetItems(items || []);
+    } catch (err) {
+      console.error('Error cargando ítems:', err.message);
+    } finally {
+      setLoadingItems(false);
+    }
+  };
+
   const [selectedNombres, setSelectedNombres] = useState([]);
   const [selectedVeredictos, setSelectedVeredictos] = useState([]);
   const [isNombreOpen, setIsNombreOpen] = useState(false);
   const [isVeredictoOpen, setIsVeredictoOpen] = useState(false);
- 
+
   const nombresUnicos = useMemo(() => [...new Set(data.map(item => item.nombre))].sort(), [data]);
   const veredictosUnicos = [
     'APTO (En Rango)',
     'EN OBSERVACIÓN (Requiere Justificación)',
     'NO APTO (Fuera de Rango / Sobrevaluado)'
   ];
- 
-  const formatCurrency = (val) => {
-    return new Intl.NumberFormat('es-AR', {
-      style: 'currency',
-      currency: 'ARS',
-      minimumFractionDigits: 2
-    }).format(val);
-  };
- 
+
+  const formatCurrency = (val) => new Intl.NumberFormat('es-AR', {
+    style: 'currency', currency: 'ARS', minimumFractionDigits: 2
+  }).format(val || 0);
+
   const handleToggle = (list, setList, value) => {
-    if (list.includes(value)) {
-      setList(list.filter(item => item !== value));
-    } else {
-      setList([...list, value]);
-    }
+    setList(list.includes(value) ? list.filter(i => i !== value) : [...list, value]);
   };
- 
+
   const filteredData = useMemo(() => {
     return data.filter(item => {
       const matchNombre = selectedNombres.length === 0 || selectedNombres.includes(item.nombre);
@@ -91,20 +90,20 @@ const App = () => {
       return matchNombre && matchVeredicto;
     });
   }, [data, selectedNombres, selectedVeredictos]);
- 
+
   const getStatusStyles = (veredicto) => {
     if (!veredicto) return 'bg-gray-100 text-gray-600 border-gray-200';
     if (veredicto.includes('APTO (En Rango)')) return 'bg-[#c6efce] text-[#006100] border-[#92d050]';
     if (veredicto.includes('EN OBSERVACIÓN')) return 'bg-[#ffeb9c] text-[#9c6500] border-[#ffc000]';
     return 'bg-[#ffc7ce] text-[#9c0006] border-[#ff0000]';
   };
- 
+
   const handleRowClick = (item) => {
     setSelectedItem(item);
     setView('detail');
+    fetchItems(item.nombre);
   };
- 
-  // Pantalla de carga
+
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-[#f3f4f6]">
       <div className="text-center">
@@ -113,24 +112,18 @@ const App = () => {
       </div>
     </div>
   );
- 
-  // Pantalla de error
+
   if (error) return (
     <div className="min-h-screen flex items-center justify-center bg-[#f3f4f6] p-8">
       <div className="bg-white rounded-2xl p-10 shadow-xl text-center max-w-md">
         <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
         <h2 className="font-black text-gray-800 text-xl mb-2">Error de conexión</h2>
         <p className="text-xs font-mono bg-gray-50 p-3 rounded text-gray-500 mb-6">{error}</p>
-        <button 
-          onClick={() => window.location.reload()} 
-          className="bg-[#1f4e3d] text-white px-6 py-3 rounded-lg font-bold text-sm"
-        >
-          Reintentar
-        </button>
+        <button onClick={() => window.location.reload()} className="bg-[#1f4e3d] text-white px-6 py-3 rounded-lg font-bold text-sm">Reintentar</button>
       </div>
     </div>
   );
- 
+
   if (view === 'list') {
     return (
       <div className="min-h-screen bg-[#f3f4f6] p-4 md:p-8 font-sans text-gray-800">
@@ -149,11 +142,11 @@ const App = () => {
               <Download size={16} /> Descargar Reporte Completo
             </button>
           </div>
- 
+
           <div className="bg-white border-x border-b border-gray-200 p-6 shadow-sm flex flex-col md:flex-row gap-4">
             <div className="relative flex-1">
               <label className="block text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider ml-1">Seleccionar Licitación / Obra</label>
-              <button 
+              <button
                 onClick={() => { setIsNombreOpen(!isNombreOpen); setIsVeredictoOpen(false); }}
                 className={`w-full flex items-center justify-between px-4 py-2 border rounded-lg bg-white transition-all ${isNombreOpen ? 'ring-2 ring-[#1f4e3d] border-[#1f4e3d]' : 'border-gray-200 hover:border-gray-300'}`}
               >
@@ -179,10 +172,10 @@ const App = () => {
                 </div>
               )}
             </div>
- 
+
             <div className="relative w-full md:w-72">
               <label className="block text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider ml-1">Estado de Aptitud</label>
-              <button 
+              <button
                 onClick={() => { setIsVeredictoOpen(!isVeredictoOpen); setIsNombreOpen(false); }}
                 className={`w-full flex items-center justify-between px-4 py-2 border rounded-lg bg-white transition-all ${isVeredictoOpen ? 'ring-2 ring-[#1f4e3d] border-[#1f4e3d]' : 'border-gray-200 hover:border-gray-300'}`}
               >
@@ -205,7 +198,7 @@ const App = () => {
               )}
             </div>
           </div>
- 
+
           <div className="bg-white rounded-b-xl shadow-xl overflow-hidden border-x border-b border-gray-200">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse">
@@ -220,11 +213,7 @@ const App = () => {
                 <tbody className="divide-y divide-gray-100">
                   {filteredData.length > 0 ? (
                     filteredData.map((item) => (
-                      <tr 
-                        key={item.id} 
-                        onClick={() => handleRowClick(item)}
-                        className="hover:bg-blue-50/80 cursor-pointer transition-colors group"
-                      >
+                      <tr key={item.id} onClick={() => handleRowClick(item)} className="hover:bg-blue-50/80 cursor-pointer transition-colors group">
                         <td className="p-4">
                           <div className="flex items-center gap-3">
                             <div className="bg-gray-100 p-2 rounded text-gray-400 group-hover:text-blue-500 transition-colors">
@@ -234,13 +223,11 @@ const App = () => {
                           </div>
                         </td>
                         <td className="p-4 text-right">
-                          <span className="text-xs font-bold text-gray-800 tabular-nums">
-                            {formatCurrency(item.monto)}
-                          </span>
+                          <span className="text-xs font-bold text-gray-800 tabular-nums">{formatCurrency(item.monto)}</span>
                         </td>
                         <td className="p-4 text-center">
-                          <span className={`text-xs font-black tabular-nums ${item.desvio <= 5 ? 'text-green-600' : item.desvio <= 20 ? 'text-amber-600' : 'text-red-600'}`}>
-                            {item.desvio > 0 ? '+' : ''}{parseFloat(item.desvio).toFixed(2)}%
+                          <span className={`text-xs font-black tabular-nums ${parseFloat(item.desvio) <= 5 ? 'text-green-600' : parseFloat(item.desvio) <= 20 ? 'text-amber-600' : 'text-red-600'}`}>
+                            {parseFloat(item.desvio) > 0 ? '+' : ''}{parseFloat(item.desvio).toFixed(2)}%
                           </span>
                         </td>
                         <td className="p-4 text-center">
@@ -260,7 +247,7 @@ const App = () => {
                 </tbody>
               </table>
             </div>
- 
+
             <div className="bg-[#f8fafc] p-6 border-t border-gray-200 flex flex-col md:flex-row justify-between items-center gap-6">
               <div className="flex gap-8">
                 <div className="text-center">
@@ -297,13 +284,13 @@ const App = () => {
       </div>
     );
   }
- 
+
   // VISTA DE DETALLE
   return (
     <div className="min-h-screen bg-[#f3f4f6] p-4 md:p-8 font-sans">
       <div className="max-w-6xl mx-auto">
         <div className="mb-6 flex items-center justify-between">
-          <button 
+          <button
             onClick={() => setView('list')}
             className="flex items-center gap-2 text-[#1f4e3d] hover:bg-[#1f4e3d] hover:text-white px-4 py-2 rounded-lg transition font-bold text-sm"
           >
@@ -313,7 +300,7 @@ const App = () => {
             {selectedItem.veredicto}
           </div>
         </div>
- 
+
         <div className="bg-white rounded-xl shadow-md overflow-hidden mb-6 border border-gray-200">
           <div className="bg-gray-50 px-6 py-3 border-b flex items-center gap-2">
             <Building2 size={18} className="text-[#1f4e3d]" />
@@ -323,7 +310,7 @@ const App = () => {
             <div className="space-y-3">
               <div className="flex justify-between border-b border-gray-100 pb-2">
                 <span className="text-[9px] font-bold text-gray-400 uppercase">Comitente</span>
-                <span className="text-xs font-bold text-gray-700 text-right">{selectedItem.comitente}</span>
+                <span className="text-xs font-bold text-gray-700 text-right">{selectedItem.comitente || '—'}</span>
               </div>
               <div className="flex justify-between border-b border-gray-100 pb-2">
                 <span className="text-[9px] font-bold text-gray-400 uppercase">Obra</span>
@@ -333,16 +320,18 @@ const App = () => {
             <div className="space-y-3">
               <div className="flex justify-between border-b border-gray-100 pb-2">
                 <span className="text-[9px] font-bold text-gray-400 uppercase">Empresa Constructora</span>
-                <span className="text-xs font-black text-gray-800 text-right">{selectedItem.empresa}</span>
+                <span className="text-xs font-black text-gray-800 text-right">{selectedItem.empresa || '—'}</span>
               </div>
               <div className="flex justify-between border-b border-gray-100 pb-2">
-                <span className="text-[9px] font-bold text-gray-400 uppercase">Oferta Económica</span>
-                <span className="text-sm font-black text-[#1f4e3d]">{formatCurrency(selectedItem.monto)}</span>
+                <span className="text-[9px] font-bold text-gray-400 uppercase">Desvío General</span>
+                <span className={`text-sm font-black ${parseFloat(selectedItem.desvio) > 20 ? 'text-red-600' : parseFloat(selectedItem.desvio) > 5 ? 'text-amber-600' : 'text-green-700'}`}>
+                  {parseFloat(selectedItem.desvio) > 0 ? '+' : ''}{parseFloat(selectedItem.desvio).toFixed(2)}%
+                </span>
               </div>
             </div>
           </div>
         </div>
- 
+
         <div className="bg-white rounded-xl shadow-xl overflow-hidden border border-gray-200">
           <div className="bg-[#1f4e3d] px-6 py-4 flex justify-between items-center">
             <div className="flex items-center gap-3">
@@ -350,63 +339,74 @@ const App = () => {
               <h3 className="text-white text-xs font-bold uppercase tracking-widest">Desglose Comparativo de Costos</h3>
             </div>
             <div className="flex items-center gap-2 bg-white/10 px-3 py-1 rounded text-white text-xs font-bold">
-               <TrendingUp size={14} className={selectedItem.desvio > 0 ? "text-red-400" : "text-green-400"} />
-               Desvío de Oferta: {selectedItem.desvio}%
+              <TrendingUp size={14} className={parseFloat(selectedItem.desvio) > 0 ? "text-red-400" : "text-green-400"} />
+              Desvío de Oferta: {parseFloat(selectedItem.desvio).toFixed(2)}%
             </div>
           </div>
-          
+
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="p-4 text-left text-[9px] font-black text-gray-500 uppercase">Ítem / Designación de Tareas</th>
-                  <th className="p-4 text-right text-[9px] font-black text-gray-500 uppercase">Unit. Maestro</th>
-                  <th className="p-4 text-right text-[9px] font-black text-gray-500 uppercase">Unit. Cotizado</th>
-                  <th className="p-4 text-right text-[9px] font-black text-gray-500 uppercase">Diferencia</th>
-                  <th className="p-4 text-center text-[9px] font-black text-gray-500 uppercase">Desvío %</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {budgetItems.map((bi, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                    <td className="p-4 max-w-sm">
-                      <p className="text-[10px] font-medium text-gray-700 leading-tight">{bi.item}</p>
-                    </td>
-                    <td className="p-4 text-right text-[10px] text-gray-400 font-medium">{formatCurrency(bi.maestro)}</td>
-                    <td className="p-4 text-right text-[10px] font-bold text-gray-800">{formatCurrency(bi.cotizado)}</td>
-                    <td className="p-4 text-right text-[10px] font-medium text-gray-600">
-                      {bi.dif > 0 ? '+' : ''}{formatCurrency(bi.dif)}
-                    </td>
-                    <td className="p-4 text-center">
-                      <div className={`inline-block px-2 py-0.5 rounded text-[9px] font-black border ${
-                        bi.desvio > 20 ? 'bg-red-50 text-red-700 border-red-200' : 
-                        bi.desvio < 0 ? 'bg-green-50 text-green-700 border-green-200' : 
-                        'bg-gray-50 text-gray-600 border-gray-200'
-                      }`}>
-                        {bi.desvio > 0 ? '+' : ''}{bi.desvio.toFixed(2)}%
-                      </div>
-                    </td>
+            {loadingItems ? (
+              <div className="flex items-center justify-center py-20">
+                <div className="w-8 h-8 border-4 border-green-100 border-t-[#1f4e3d] rounded-full animate-spin mr-3"></div>
+                <p className="text-gray-400 font-bold uppercase tracking-widest text-xs">Cargando ítems...</p>
+              </div>
+            ) : budgetItems.length === 0 ? (
+              <div className="py-20 text-center text-gray-400 font-bold uppercase tracking-widest text-xs opacity-50">
+                Sin ítems cotizados para este presupuesto
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="p-4 text-left text-[9px] font-black text-gray-500 uppercase">Ítem / Designación de Tareas</th>
+                    <th className="p-4 text-right text-[9px] font-black text-gray-500 uppercase">Unit. Maestro</th>
+                    <th className="p-4 text-right text-[9px] font-black text-gray-500 uppercase">Unit. Cotizado</th>
+                    <th className="p-4 text-right text-[9px] font-black text-gray-500 uppercase">Diferencia</th>
+                    <th className="p-4 text-center text-[9px] font-black text-gray-500 uppercase">Desvío %</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {budgetItems.map((bi, idx) => (
+                    <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                      <td className="p-4 max-w-sm">
+                        <p className="text-[10px] font-medium text-gray-700 leading-tight">{bi.item}</p>
+                      </td>
+                      <td className="p-4 text-right text-[10px] text-gray-400 font-medium">{formatCurrency(bi.maestro)}</td>
+                      <td className="p-4 text-right text-[10px] font-bold text-gray-800">{formatCurrency(bi.cotizado)}</td>
+                      <td className="p-4 text-right text-[10px] font-medium text-gray-600">
+                        {parseFloat(bi.diferencia) > 0 ? '+' : ''}{formatCurrency(bi.diferencia)}
+                      </td>
+                      <td className="p-4 text-center">
+                        <div className={`inline-block px-2 py-0.5 rounded text-[9px] font-black border ${
+                          parseFloat(bi.desvio) > 20 ? 'bg-red-50 text-red-700 border-red-200' :
+                          parseFloat(bi.desvio) < 0 ? 'bg-green-50 text-green-700 border-green-200' :
+                          'bg-gray-50 text-gray-600 border-gray-200'
+                        }`}>
+                          {parseFloat(bi.desvio) > 0 ? '+' : ''}{parseFloat(bi.desvio).toFixed(2)}%
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
- 
+
           <div className="bg-gray-50 p-4 border-t border-gray-200 flex justify-end gap-6 items-center">
-             <div className="text-right">
-                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Estado de Análisis</p>
-                <p className={`text-xs font-black uppercase ${selectedItem.desvio > 20 ? 'text-red-600' : 'text-green-700'}`}>
-                  {selectedItem.veredicto}
-                </p>
-             </div>
-             <button className="bg-[#1f4e3d] text-white px-5 py-2 rounded font-bold text-[10px] uppercase hover:bg-black transition shadow-sm">
-               Descargar XML Presupuestario
-             </button>
+            <div className="text-right">
+              <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Estado de Análisis</p>
+              <p className={`text-xs font-black uppercase ${parseFloat(selectedItem.desvio) > 20 ? 'text-red-600' : 'text-green-700'}`}>
+                {selectedItem.veredicto}
+              </p>
+            </div>
+            <button className="bg-[#1f4e3d] text-white px-5 py-2 rounded font-bold text-[10px] uppercase hover:bg-black transition shadow-sm">
+              Descargar XML Presupuestario
+            </button>
           </div>
         </div>
       </div>
     </div>
   );
 };
- 
+
 export default App;
